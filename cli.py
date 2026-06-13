@@ -704,6 +704,16 @@ class JavaAgentCLI:
             self.R.info(f"Контекст проекта загружен: {md_path}")
             self.console.print()
 
+        # Подсказка если в директории нет Java-проекта
+        if self.project_info.get("build", "unknown") == "unknown":
+            root_path = Path(root).resolve()
+            self.console.print(
+                f"[yellow]⚠  В [bold]{root_path}[/bold] не найден pom.xml / build.gradle.[/yellow]\n"
+                "   Если проект уже существует — укажи путь: [bold]/project <путь>[/bold]\n"
+                "   Если хочешь создать новый — просто опиши задачу, агент создаст файлы."
+            )
+            self.console.print()
+
     def _print_status(self) -> None:
         java = self.cfg.java
         root = Path(java.project_root if java else ".").name
