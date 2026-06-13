@@ -8,30 +8,24 @@ api:
   api_key: ""                              # или OPENAI_API_KEY в .env
 
 # Модели. Для кодинг-агента обычно достаточно одной мощной модели
-models:
-  research: "openai:gpt-4.1"              # основная модель агента
-  summarization: "openai:gpt-4.1-mini"
-  compression: "openai:gpt-4.1"
-  final_report: "openai:gpt-4.1"
+#models:
+#  research: "openai:gpt-4.1"              # основная модель агента
+#  summarization: "openai:gpt-4.1-mini"
+#  compression: "openai:gpt-4.1"
+#  final_report: "openai:gpt-4.1"
 
 # ── GigaChat (Сбер) ──────────────────────────────────────────────────
 # Раскомментируй и заполни чтобы использовать GigaChat вместо OpenAI.
-# Установка: pip install langchain-gigachat
-#
-# Шаг 1: получи ключ на https://developers.sber.ru/studio
-# Шаг 2: задай credentials здесь или в .env как GIGACHAT_CREDENTIALS
-# Шаг 3: смени models.research на "gigachat:GigaChat-Pro" (или Max)
-#
-# gigachat:
-#   credentials: ""          # или GIGACHAT_CREDENTIALS в .env
-#   scope: "GIGACHAT_API_PERS"   # GIGACHAT_API_PERS | GIGACHAT_API_CORP | GIGACHAT_API_B2B
-#   verify_ssl_certs: false  # false для работы без российских CA
-#
-# models:
-#   research: "gigachat:GigaChat-Max"
-#   summarization: "gigachat:GigaChat-Pro"
-#   compression: "gigachat:GigaChat-Pro"
-#   final_report: "gigachat:GigaChat-Max"
+gigachat:
+   credentials: ""          # или GIGACHAT_CREDENTIALS в .env
+   scope: "GIGACHAT_API_PERS"   # GIGACHAT_API_PERS | GIGACHAT_API_CORP | GIGACHAT_API_B2B
+   verify_ssl_certs: false  # false для работы без российских CA
+
+models:
+   research: "gigachat:GigaChat-Max"
+   summarization: "gigachat:GigaChat-Pro"
+   compression: "gigachat:GigaChat-Pro"
+   final_report: "gigachat:GigaChat-Max"
 
 # Java-специфичные настройки
 java:

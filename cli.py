@@ -542,8 +542,19 @@ class JavaAgentCLI:
     def _cmd_config(self) -> None:
         java = self.cfg.java
         pinfo = self.project_info
-        key = self.cfg.api.resolved_api_key()
-        key_disp = f"***{key[-4:]}" if len(key) > 4 else "[red](не задан!)[/red]"
+
+        # Определяем провайдера и отображаем соответствующий ключ
+        gc_creds = self.cfg.gigachat and self.cfg.gigachat.resolved_credentials()
+        openai_key = self.cfg.api.resolved_api_key()
+        if gc_creds:
+            provider_disp = f"GigaChat ({self.cfg.gigachat.scope})"
+            key_disp = f"***{gc_creds[-4:]}" if len(gc_creds) > 4 else "[red](не задан!)[/red]"
+        elif openai_key:
+            provider_disp = self.cfg.api.resolved_base_url()
+            key_disp = f"***{openai_key[-4:]}" if len(openai_key) > 4 else "[red](не задан!)[/red]"
+        else:
+            provider_disp = self.cfg.api.resolved_base_url()
+            key_disp = "[red](не задан!)[/red]"
 
         t = Table(box=box.SIMPLE, show_header=False, padding=(0, 2))
         t.add_column("", style="bold",  no_wrap=True)
@@ -551,7 +562,7 @@ class JavaAgentCLI:
 
         rows = [
             ("Конфиг",          self.config_path),
-            ("API endpoint",    self.cfg.api.resolved_base_url()),
+            ("Провайдер",       provider_disp),
             ("API key",         key_disp),
             ("Модель",          self.cfg.models.research),
             ("Суммар. модель",  self.cfg.models.summarization),
@@ -665,11 +676,15 @@ class JavaAgentCLI:
             padding=(1, 2),
         ))
 
-        key = self.cfg.api.resolved_api_key()
-        if not key:
+        has_key = (
+            self.cfg.api.resolved_api_key()
+            or (self.cfg.gigachat and self.cfg.gigachat.resolved_credentials())
+        )
+        if not has_key:
             self.R.error(
                 "API ключ не задан.\n"
-                "  Добавь OPENAI_API_KEY в .env или java_config.yaml"
+                "  GigaChat: добавь GIGACHAT_CREDENTIALS в .env\n"
+                "  OpenAI:   добавь OPENAI_API_KEY в .env"
             )
             self.console.print()
 
