@@ -179,6 +179,85 @@ def _fmt_tool_args(args: Dict[str, Any]) -> str:
     return ", ".join(parts)
 
 
+def _fmt_tool_result(tool_name: str, content: str, verbose: bool = False) -> Optional[str]:
+    """Форматирует результат инструмента для показа под строкой ⚙.
+
+    Всегда показывает краткое резюме. verbose=True даёт больше строк.
+    Возвращает None если нечего показывать.
+    """
+    text = content.strip()
+    if not text:
+        return None
+
+    max_lines = 20 if verbose else 6
+
+    # ── Maven / Gradle: выделяем BUILD SUCCESS/FAILURE и ошибки ────
+    if tool_name in ("run_maven", "run_gradle", "run_command"):
+        lines = text.splitlines()
+
+        # Ищем итоговую строку
+        status_line = ""
+        for line in reversed(lines):
+            if "BUILD SUCCESS" in line:
+                status_line = "[green]✓ BUILD SUCCESS[/green]"
+                break
+            if "BUILD FAILURE" in line or "BUILD FAILED" in line:
+                status_line = "[red]✗ BUILD FAILURE[/red]"
+                break
+        if not status_line and lines:
+            # Для обычных команд — последняя непустая строка
+            for line in reversed(lines):
+                if line.strip():
+                    status_line = line.strip()[:120]
+                    break
+
+        # Собираем строки с ошибками/предупреждениями
+        error_lines: List[str] = []
+        for line in lines:
+            stripped = line.strip()
+            if any(stripped.startswith(p) for p in ("[ERROR]", "[error]", "error:", "ERROR")):
+                # Пропускаем мусорные строки maven
+                if "To see the full stack trace" in stripped:
+                    continue
+                if "Re-run Maven" in stripped:
+                    continue
+                error_lines.append(f"  [red]{stripped[:120]}[/red]")
+            elif verbose and any(stripped.startswith(p) for p in ("[WARNING]", "[WARN]", "WARN")):
+                error_lines.append(f"  [yellow]{stripped[:120]}[/yellow]")
+
+        result_parts = []
+        if status_line:
+            result_parts.append(f"   ↳ {status_line}")
+        for el in error_lines[:max_lines]:
+            result_parts.append(el)
+        if len(error_lines) > max_lines:
+            result_parts.append(f"   [dim]... ещё {len(error_lines) - max_lines} ошибок[/dim]")
+
+        return "\n".join(result_parts) if result_parts else None
+
+    # ── write_file: показываем размер ───────────────────────────────
+    if tool_name == "write_file":
+        size = len(content.encode("utf-8"))
+        if size >= 1024:
+            return f"   ↳ [green]✓ записано {size / 1024:.1f} KB[/green]"
+        return f"   ↳ [green]✓ записано {size} байт[/green]"
+
+    # ── read_file: первые строки содержимого ────────────────────────
+    if tool_name == "read_file":
+        lines = text.splitlines()
+        preview = lines[: max_lines]
+        tail = f"\n   [dim]... ещё {len(lines) - max_lines} строк[/dim]" if len(lines) > max_lines else ""
+        return "   [dim]" + "\n   ".join(preview) + "[/dim]" + tail
+
+    # ── Остальные: первые N строк ────────────────────────────────────
+    lines = text.splitlines()
+    preview = lines[:max_lines]
+    result = "   ↳ " + "\n     ".join(line[:120] for line in preview)
+    if len(lines) > max_lines:
+        result += f"\n   [dim]... ещё {len(lines) - max_lines} строк[/dim]"
+    return result
+
+
 # ────────────────────────── Renderer ────────────────────────────────
 
 class Renderer:
@@ -186,9 +265,12 @@ class Renderer:
         self.console = console
         self.verbose = verbose
         self._answer_started = False
+        # Запоминаем имя последнего вызванного инструмента для привязки результата
+        self._last_tool_name: str = ""
 
     def reset(self) -> None:
         self._answer_started = False
+        self._last_tool_name = ""
 
     def render_chunk(self, chunk: Dict[str, Any]) -> None:
         for node, data in chunk.items():
@@ -206,8 +288,10 @@ class Renderer:
                 return
             if role == "assistant":
                 self._print_ai(content)
-            elif role == "tool" and self.verbose:
-                self.console.print(f"[tool.result]  ↳ {content[:200]}[/tool.result]")
+            elif role == "tool":
+                formatted = _fmt_tool_result(self._last_tool_name, content, self.verbose)
+                if formatted:
+                    self.console.print(formatted)
             return
 
         # AIMessage с tool_calls
@@ -217,15 +301,18 @@ class Renderer:
                 name = tc.get("name", "?")
                 args_str = _fmt_tool_args(tc.get("args", {}))
                 self.console.print(f"[tool.call]⚙  {name}({args_str})[/tool.call]")
+                self._last_tool_name = name
             return
 
-        # ToolMessage
+        # ToolMessage — всегда показываем результат
         try:
             from langchain_core.messages import ToolMessage  # type: ignore
             if isinstance(msg, ToolMessage):
-                if self.verbose:
-                    preview = (str(msg.content) or "")[:200].replace("\n", " ")
-                    self.console.print(f"[tool.result]  ↳ {preview}[/tool.result]")
+                tool_name = getattr(msg, "name", self._last_tool_name) or self._last_tool_name
+                content = str(msg.content or "")
+                formatted = _fmt_tool_result(tool_name, content, self.verbose)
+                if formatted:
+                    self.console.print(formatted)
                 return
         except ImportError:
             pass
