@@ -313,8 +313,16 @@ class JavaAgentCLI:
         auto_part  = "~" if self.auto_skill and not self.active_skill else ""
         count = self.session.message_count()
         count_part = f"({count}) " if count > 0 else ""
+        prompt_str = f"{count_part}{skill_part}{auto_part}> "
         try:
-            return input(f"{count_part}{skill_part}{auto_part}> ")
+            # Явный вывод промта и чтение из буфера — обход проблем с кодировкой stdin
+            import sys
+            sys.stdout.write(prompt_str)
+            sys.stdout.flush()
+            line = sys.stdin.buffer.readline()
+            if not line:
+                raise EOFError
+            return line.decode("utf-8", errors="replace").rstrip("\n")
         except (EOFError, KeyboardInterrupt):
             raise
 
