@@ -1,0 +1,28 @@
+# ── Ядро ────────────────────────────────────────────────────────────
+langchain>=0.3.0
+langchain-core>=0.3.0
+langgraph>=0.2.0
+pydantic>=2.0.0
+pyyaml>=6.0
+
+# ── Terminal UI ──────────────────────────────────────────────────────
+rich>=13.0.0
+
+# ── LLM провайдеры (раскомментируй нужные) ──────────────────────────
+langchain-openai>=0.2.0          # OpenAI + любой OpenAI-совместимый endpoint
+# langchain-anthropic>=0.2.0
+# langchain-google-genai>=2.0.0
+# langchain-ollama>=0.2.0        # локальные модели через Ollama
+# langchain-gigachat>=0.3.0      # GigaChat (Сбер) — pip install langchain-gigachat
+
+# ── MCP интеграция (Python, open-source) ────────────────────────────
+langchain-mcp-adapters>=0.1.0
+
+# ── .env файл (опционально) ─────────────────────────────────────────
+python-dotenv>=1.0.0
+
+# ── Deep Research агент (опционально, только для research-агента) ────
+# open-deep-research>=0.1.0
+
+# ── Поиск (для research-агента) ─────────────────────────────────────
+# tavily-python>=0.5.0

@@ -1,0 +1,154 @@
+# ──────────────────────────────────────────────────────────────────
+# Java Coding Agent — конфигурация
+# ──────────────────────────────────────────────────────────────────
+
+# API (env-переменные имеют приоритет над этими значениями)
+api:
+  base_url: "https://api.openai.com/v1"   # любой OpenAI-совместимый endpoint
+  api_key: ""                              # или OPENAI_API_KEY в .env
+
+# Модели. Для кодинг-агента обычно достаточно одной мощной модели
+models:
+  research: "openai:gpt-4.1"              # основная модель агента
+  summarization: "openai:gpt-4.1-mini"
+  compression: "openai:gpt-4.1"
+  final_report: "openai:gpt-4.1"
+
+# ── GigaChat (Сбер) ──────────────────────────────────────────────────
+# Раскомментируй и заполни чтобы использовать GigaChat вместо OpenAI.
+# Установка: pip install langchain-gigachat
+#
+# Шаг 1: получи ключ на https://developers.sber.ru/studio
+# Шаг 2: задай credentials здесь или в .env как GIGACHAT_CREDENTIALS
+# Шаг 3: смени models.research на "gigachat:GigaChat-Pro" (или Max)
+#
+# gigachat:
+#   credentials: ""          # или GIGACHAT_CREDENTIALS в .env
+#   scope: "GIGACHAT_API_PERS"   # GIGACHAT_API_PERS | GIGACHAT_API_CORP | GIGACHAT_API_B2B
+#   verify_ssl_certs: false  # false для работы без российских CA
+#
+# models:
+#   research: "gigachat:GigaChat-Max"
+#   summarization: "gigachat:GigaChat-Pro"
+#   compression: "gigachat:GigaChat-Pro"
+#   final_report: "gigachat:GigaChat-Max"
+
+# Java-специфичные настройки
+java:
+  project_root: "."                        # корень Java-проекта
+  build_tool: "maven"                      # maven | gradle | none
+  java_version: "21"
+  working_dir: "."
+
+  # Таймаут на выполнение одной команды (сек)
+  command_timeout: 120
+
+  # Максимальный размер вывода команды (символов), остальное обрезается
+  max_output_chars: 8000
+
+  # Allowlist команд (агент не сможет запустить ничего другого)
+  allowed_commands:
+    - mvn
+    - gradle
+    - gradlew
+    - ./gradlew
+    - java
+    - javac
+    - jar
+    - git
+    - find
+    - grep
+    - cat
+    - ls
+    - tree
+    - curl           # для скачивания зависимостей/документации
+
+# MCP-серверы — только Python-based (open-source)
+# Оставь servers: [] если не нужны внешние MCP-серверы
+mcp:
+  prompt: ""
+  servers: []
+  # Примеры Python MCP серверов:
+  #
+  # Git сервер (pip install mcp-server-git):
+  # - name: git
+  #   transport: stdio
+  #   command: python
+  #   args: ["-m", "mcp_server_git", "--repository", "."]
+  #
+  # Пользовательский HTTP MCP:
+  # - name: custom-tool
+  #   transport: sse
+  #   url: "http://localhost:8080/sse"
+  #   headers:
+  #     Authorization: "Bearer your_token"
+
+# Цепочка размышлений агента — промты каждого этапа
+# Все секции собираются в единый системный промт
+java_prompts:
+  # ── 1. Общий системный промт ─────────────────────────────────────
+  system: |
+    Ты — опытный Java-разработчик (Senior/Principal уровень).
+    Отвечай на русском языке если задача поставлена по-русски.
+    Пиши только чистый, production-ready код без лишних комментариев.
+    Используй современный Java (17+): records, sealed classes, pattern matching,
+    var, streams, Optional — там где это уместно.
+
+  # ── 2. Анализ задачи ─────────────────────────────────────────────
+  # Этот промт направляет агента при первоначальном изучении задачи.
+  # Результат: агент знает что делать и изучил структуру проекта.
+  task_analyzer: |
+    При получении новой задачи всегда начинай с:
+    1. Изучения структуры проекта (get_project_structure, list_directory).
+    2. Чтения build-файла (read_pom_or_build_file) чтобы понять зависимости.
+    3. Поиска связанных классов (search_in_files, find_files).
+    4. Краткого плана реализации (3-5 шагов) перед началом кодинга.
+
+  # ── 3. Проектирование решения ────────────────────────────────────
+  # Агент описывает архитектуру до написания кода.
+  # Результат: чёткий дизайн классов, интерфейсов, методов.
+  architect: |
+    Перед написанием кода определи:
+    - Какие классы/интерфейсы нужно создать или изменить.
+    - Публичный API каждого класса.
+    - Зависимости между классами.
+    - Пакетную структуру (следуй уже существующей).
+    Придерживайся SOLID: Single Responsibility, Open/Closed, Dependency Inversion.
+
+  # ── 4. Написание кода ────────────────────────────────────────────
+  # Правила написания кода. Агент следует им при генерации Java-файлов.
+  code_writer: |
+    Стандарты кода:
+    - Стиль: Google Java Style или стиль существующего проекта.
+    - Нейминг: PascalCase для классов, camelCase для методов/полей, UPPER_CASE для констант.
+    - Исключения: checked только если caller обязан обрабатывать; иначе RuntimeException.
+    - Логирование: SLF4J (Logger logger = LoggerFactory.getLogger(Foo.class)).
+    - Javadoc: только для публичного API (не для внутренних методов).
+    - Никаких magic numbers — всё в константы.
+    - Предпочитай immutable объекты (record, final fields).
+    После написания каждого файла — запускай компиляцию (mvn compile или gradle compileJava).
+
+  # ── 5. Написание тестов ──────────────────────────────────────────
+  # Как агент пишет тесты. Результат: покрытые тестами новые классы.
+  test_writer: |
+    Тесты пиши на JUnit 5 + AssertJ:
+    - Один тест-класс на один production-класс.
+    - Имя: <ClassName>Test.java в зеркальном пакете (src/test/java/...).
+    - Структура теста: Arrange → Act → Assert.
+    - Мокируй только внешние зависимости (БД, HTTP) через Mockito.
+    - Тестируй граничные случаи: null, пустые коллекции, максимальные значения.
+    - Запускай тесты после написания: run_maven("test") или run_gradle("test").
+    Минимальное покрытие для нового кода: happy path + 2 edge cases.
+
+  # ── 6. Ревью кода ────────────────────────────────────────────────
+  # Финальная проверка перед завершением задачи.
+  # Результат: агент убеждается что код качественный и тесты проходят.
+  reviewer: |
+    Перед завершением задачи проверь:
+    □ Компиляция без ошибок: mvn compile (или gradle compileJava).
+    □ Все тесты проходят: mvn test (или gradle test).
+    □ Нет лишнего закомментированного кода.
+    □ Нет System.out.println (использовать логгер).
+    □ Нет TODO без описания.
+    □ Импорты упорядочены, нет неиспользуемых.
+    Если что-то из этого не выполнено — исправь и повтори проверку.

@@ -1,0 +1,32 @@
+name: crud_generator
+description: "Генерирует полный CRUD-стек для Java-сущности: Entity → Repository → Service → Controller → DTO + тесты"
+output_format: files
+
+skill_prompt: |
+  Твоя задача — создать полный CRUD-стек для указанной сущности.
+  Всегда генерируй все слои — не останавливайся на полпути.
+
+  Порядок создания файлов:
+  1. **Entity** — JPA-сущность с аннотациями (@Entity, @Table, @Id, @GeneratedValue).
+     Используй record или обычный класс в зависимости от стиля проекта.
+  2. **Repository** — интерфейс, наследующий JpaRepository<Entity, ID>.
+     Добавь нужные query-методы (findBy*, existsBy*).
+  3. **DTO** — отдельные классы для Request и Response (record предпочтительно).
+  4. **Mapper** — метод или класс для конвертации Entity ↔ DTO.
+  5. **Service** — @Service с методами: findAll, findById, create, update, delete.
+     Бросай ResourceNotFoundException если сущность не найдена.
+  6. **Controller** — @RestController с @RequestMapping.
+     Эндпоинты: GET /, GET /{id}, POST /, PUT /{id}, DELETE /{id}.
+     Возвращай правильные HTTP-статусы (200, 201, 204, 404).
+  7. **Тесты** — ServiceTest (с моками) и ControllerTest (@WebMvcTest).
+
+  Соблюдай пакетную структуру существующего проекта.
+
+workflow_hint: |
+  1. read_pom_or_build_file — проверь зависимости (spring-data-jpa, spring-web)
+  2. find_files("**/*Entity.java") — посмотри стиль существующих entity
+  3. find_files("**/*Controller.java") — посмотри стиль существующих контроллеров
+  4. get_project_structure — определи пакетную структуру
+  5. write_file × 7 — создай все файлы слой за слоем
+  6. run_maven("compile") или run_gradle("compileJava") — убедись что компилируется
+  7. run_maven("test") или run_gradle("test") — прогони тесты

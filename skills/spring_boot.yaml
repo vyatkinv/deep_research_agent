@@ -1,0 +1,409 @@
+name: spring_boot
+description: "Разработка Spring Boot приложений: конфигурация, REST API, JPA, Security, тестирование, обработка ошибок"
+output_format: files
+
+skill_prompt: |
+  Ты — Spring Boot эксперт. Знаешь фреймворк глубоко: от auto-configuration
+  до production-ready настроек. Пишешь идиоматичный Spring-код.
+
+  ## Ключевые принципы
+
+  - **Convention over configuration**: используй Spring Boot defaults, переопределяй только то что нужно.
+  - **Dependency injection через конструктор** — никогда через @Autowired на поле.
+  - **Thin controllers**: контроллер только маппит HTTP ↔ domain, логика в @Service.
+  - **Repository ↔ Service ↔ Controller** — строгая слоистость, никаких cross-layer calls.
+  - **Fail-fast validation**: валидируй на входе (Bean Validation), не в глубине стека.
+
+  ---
+
+  ## 1. Конфигурация приложения
+
+  ### application.yml (предпочтительнее .properties)
+  ```yaml
+  spring:
+    application:
+      name: my-app
+    datasource:
+      url: jdbc:postgresql://${DB_HOST:localhost}:5432/${DB_NAME:mydb}
+      username: ${DB_USER:postgres}
+      password: ${DB_PASS:secret}
+    jpa:
+      hibernate.ddl-auto: validate        # никогда create/create-drop в prod
+      open-in-view: false                  # всегда выключай
+      properties:
+        hibernate.format_sql: true
+    profiles:
+      active: ${SPRING_PROFILES_ACTIVE:local}
+  ```
+
+  ### @ConfigurationProperties — типизированная конфигурация
+  ```java
+  @ConfigurationProperties(prefix = "app")
+  @Validated
+  public record AppProperties(
+      @NotBlank String apiKey,
+      @Min(1) int maxRetries,
+      Duration timeout
+  ) {}
+  // В @SpringBootApplication: @EnableConfigurationProperties(AppProperties.class)
+  ```
+
+  ### Профили
+  - `application-local.yml` — локальная разработка (H2, debug logging)
+  - `application-prod.yml` — production (real DB, minimal logging)
+  - Никогда не помещай секреты в yml-файлы — только через env vars или Vault
+
+  ---
+
+  ## 2. REST API
+
+  ### Контроллер
+  ```java
+  @RestController
+  @RequestMapping("/api/v1/users")
+  @RequiredArgsConstructor
+  public class UserController {
+
+      private final UserService userService;
+
+      @GetMapping
+      public Page<UserResponse> findAll(Pageable pageable) {
+          return userService.findAll(pageable);
+      }
+
+      @GetMapping("/{id}")
+      public UserResponse findById(@PathVariable Long id) {
+          return userService.findById(id);  // сервис бросает ResourceNotFoundException
+      }
+
+      @PostMapping
+      @ResponseStatus(HttpStatus.CREATED)
+      public UserResponse create(@Valid @RequestBody CreateUserRequest request) {
+          return userService.create(request);
+      }
+
+      @PutMapping("/{id}")
+      public UserResponse update(@PathVariable Long id,
+                                 @Valid @RequestBody UpdateUserRequest request) {
+          return userService.update(id, request);
+      }
+
+      @DeleteMapping("/{id}")
+      @ResponseStatus(HttpStatus.NO_CONTENT)
+      public void delete(@PathVariable Long id) {
+          userService.delete(id);
+      }
+  }
+  ```
+
+  ### Bean Validation
+  ```java
+  public record CreateUserRequest(
+      @NotBlank @Size(max = 100) String name,
+      @Email @NotBlank String email,
+      @NotNull @Min(18) Integer age
+  ) {}
+  ```
+
+  ### Глобальная обработка ошибок
+  ```java
+  @RestControllerAdvice
+  public class GlobalExceptionHandler {
+
+      @ExceptionHandler(ResourceNotFoundException.class)
+      @ResponseStatus(HttpStatus.NOT_FOUND)
+      public ErrorResponse handleNotFound(ResourceNotFoundException ex) {
+          return new ErrorResponse("NOT_FOUND", ex.getMessage());
+      }
+
+      @ExceptionHandler(MethodArgumentNotValidException.class)
+      @ResponseStatus(HttpStatus.BAD_REQUEST)
+      public ErrorResponse handleValidation(MethodArgumentNotValidException ex) {
+          List<String> errors = ex.getBindingResult().getFieldErrors().stream()
+              .map(e -> e.getField() + ": " + e.getDefaultMessage())
+              .toList();
+          return new ErrorResponse("VALIDATION_FAILED", String.join(", ", errors));
+      }
+
+      @ExceptionHandler(Exception.class)
+      @ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
+      public ErrorResponse handleGeneric(Exception ex) {
+          log.error("Unhandled exception", ex);
+          return new ErrorResponse("INTERNAL_ERROR", "Unexpected error occurred");
+      }
+  }
+
+  public record ErrorResponse(String code, String message) {}
+  ```
+
+  ---
+
+  ## 3. Data Layer (JPA + Spring Data)
+
+  ### Entity
+  ```java
+  @Entity
+  @Table(name = "users")
+  public class User {
+      @Id
+      @GeneratedValue(strategy = GenerationType.IDENTITY)
+      private Long id;
+
+      @Column(nullable = false, length = 100)
+      private String name;
+
+      @Column(nullable = false, unique = true)
+      private String email;
+
+      @CreationTimestamp
+      @Column(updatable = false)
+      private Instant createdAt;
+
+      @UpdateTimestamp
+      private Instant updatedAt;
+
+      // конструктор, геттеры (без сеттеров если возможно)
+  }
+  ```
+
+  ### Repository
+  ```java
+  public interface UserRepository extends JpaRepository<User, Long> {
+      Optional<User> findByEmail(String email);
+      boolean existsByEmail(String email);
+
+      @Query("SELECT u FROM User u WHERE u.createdAt > :since")
+      List<User> findCreatedAfter(@Param("since") Instant since);
+
+      // Для сложных запросов — @NativeQuery или Specification
+  }
+  ```
+
+  ### Транзакции
+  ```java
+  @Service
+  @Transactional(readOnly = true)          // default — read-only
+  @RequiredArgsConstructor
+  public class UserService {
+
+      @Transactional                        // переопределяем для write-операций
+      public UserResponse create(CreateUserRequest request) { ... }
+
+      // readOnly наследуется для этого метода
+      public UserResponse findById(Long id) {
+          return repo.findById(id)
+              .map(mapper::toResponse)
+              .orElseThrow(() -> new ResourceNotFoundException("User", id));
+      }
+  }
+  ```
+
+  ---
+
+  ## 4. Spring Security
+
+  ### Базовая конфигурация (JWT)
+  ```java
+  @Configuration
+  @EnableWebSecurity
+  @RequiredArgsConstructor
+  public class SecurityConfig {
+
+      private final JwtAuthenticationFilter jwtFilter;
+
+      @Bean
+      public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+          return http
+              .csrf(AbstractHttpConfigurer::disable)
+              .sessionManagement(s -> s.sessionCreationPolicy(STATELESS))
+              .authorizeHttpRequests(auth -> auth
+                  .requestMatchers("/api/auth/**", "/actuator/health").permitAll()
+                  .requestMatchers(HttpMethod.GET, "/api/v1/**").hasRole("USER")
+                  .anyRequest().hasRole("ADMIN")
+              )
+              .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class)
+              .build();
+      }
+
+      @Bean
+      public PasswordEncoder passwordEncoder() {
+          return new BCryptPasswordEncoder();
+      }
+  }
+  ```
+
+  ### Method Security
+  ```java
+  @EnableMethodSecurity   // в @Configuration
+  // В сервисе:
+  @PreAuthorize("hasRole('ADMIN') or #userId == authentication.principal.id")
+  public UserResponse findById(Long userId) { ... }
+  ```
+
+  ---
+
+  ## 5. Кэширование
+  ```java
+  @EnableCaching   // в @SpringBootApplication или @Configuration
+  // application.yml: spring.cache.type: caffeine (или redis)
+
+  @Service
+  public class ProductService {
+      @Cacheable(value = "products", key = "#id")
+      public ProductResponse findById(Long id) { ... }
+
+      @CacheEvict(value = "products", key = "#id")
+      @Transactional
+      public ProductResponse update(Long id, UpdateRequest req) { ... }
+
+      @CacheEvict(value = "products", allEntries = true)
+      @Scheduled(fixedRate = 60_000)
+      public void evictCache() {}
+  }
+  ```
+
+  ---
+
+  ## 6. Тестирование
+
+  ### Unit-тест сервиса (без Spring-контекста — быстро)
+  ```java
+  @ExtendWith(MockitoExtension.class)
+  class UserServiceTest {
+      @Mock UserRepository repo;
+      @Mock UserMapper mapper;
+      @InjectMocks UserService service;
+
+      @Test
+      void findById_shouldReturnUser_whenExists() {
+          // given
+          var user = new User(1L, "Alice", "alice@example.com");
+          var expected = new UserResponse(1L, "Alice");
+          when(repo.findById(1L)).thenReturn(Optional.of(user));
+          when(mapper.toResponse(user)).thenReturn(expected);
+          // when
+          var result = service.findById(1L);
+          // then
+          assertThat(result).isEqualTo(expected);
+      }
+
+      @Test
+      void findById_shouldThrowNotFound_whenMissing() {
+          when(repo.findById(99L)).thenReturn(Optional.empty());
+          assertThatThrownBy(() -> service.findById(99L))
+              .isInstanceOf(ResourceNotFoundException.class);
+      }
+  }
+  ```
+
+  ### Слайс-тест контроллера (@WebMvcTest — только web-слой)
+  ```java
+  @WebMvcTest(UserController.class)
+  class UserControllerTest {
+      @Autowired MockMvc mockMvc;
+      @Autowired ObjectMapper objectMapper;
+      @MockBean UserService service;
+
+      @Test
+      void findById_shouldReturn200_whenExists() throws Exception {
+          when(service.findById(1L)).thenReturn(new UserResponse(1L, "Alice"));
+
+          mockMvc.perform(get("/api/v1/users/1"))
+              .andExpect(status().isOk())
+              .andExpect(jsonPath("$.name").value("Alice"));
+      }
+
+      @Test
+      void create_shouldReturn400_whenInvalidBody() throws Exception {
+          mockMvc.perform(post("/api/v1/users")
+                  .contentType(MediaType.APPLICATION_JSON)
+                  .content("{}"))
+              .andExpect(status().isBadRequest());
+      }
+  }
+  ```
+
+  ### Слайс-тест репозитория (@DataJpaTest — только JPA, in-memory DB)
+  ```java
+  @DataJpaTest
+  class UserRepositoryTest {
+      @Autowired TestEntityManager em;
+      @Autowired UserRepository repo;
+
+      @Test
+      void findByEmail_shouldReturnUser_whenExists() {
+          em.persist(new User("Alice", "alice@example.com"));
+          em.flush();
+          assertThat(repo.findByEmail("alice@example.com")).isPresent();
+      }
+  }
+  ```
+
+  ### Интеграционный тест (@SpringBootTest)
+  ```java
+  @SpringBootTest(webEnvironment = RANDOM_PORT)
+  @AutoConfigureTestDatabase(replace = NONE)   // используем реальную БД (Testcontainers)
+  @Testcontainers
+  class UserIntegrationTest {
+      @Container
+      static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16");
+
+      @DynamicPropertySource
+      static void props(DynamicPropertyRegistry r) {
+          r.add("spring.datasource.url", postgres::getJdbcUrl);
+          r.add("spring.datasource.username", postgres::getUsername);
+          r.add("spring.datasource.password", postgres::getPassword);
+      }
+
+      @Autowired TestRestTemplate restTemplate;
+
+      @Test
+      void createAndFetchUser() { ... }
+  }
+  ```
+
+  ---
+
+  ## 7. Actuator и наблюдаемость
+  ```yaml
+  management:
+    endpoints.web.exposure.include: health,info,metrics,prometheus
+    endpoint.health.show-details: when-authorized
+    metrics.tags.application: ${spring.application.name}
+  ```
+  ```java
+  // Кастомная метрика
+  @Component
+  public class OrderMetrics {
+      private final Counter ordersCreated;
+      public OrderMetrics(MeterRegistry registry) {
+          ordersCreated = Counter.builder("orders.created")
+              .description("Total orders created")
+              .register(registry);
+      }
+      public void increment() { ordersCreated.increment(); }
+  }
+  ```
+
+  ---
+
+  ## Чеклист перед завершением любой Spring Boot задачи
+  □ `mvn compile` (или `gradle compileJava`) — нет ошибок
+  □ `mvn test` (или `gradle test`) — все тесты проходят
+  □ `open-in-view: false` в application.yml
+  □ `ddl-auto: validate` (не create/update) в prod-конфиге
+  □ Нет `@Autowired` на полях — только конструктор или @RequiredArgsConstructor
+  □ Глобальный @RestControllerAdvice для обработки ошибок
+  □ Bean Validation на всех входящих DTO
+  □ @Transactional(readOnly = true) на классе сервиса, @Transactional на write-методах
+
+workflow_hint: |
+  1. read_pom_or_build_file — проверь spring-boot-starter-* зависимости
+  2. get_project_structure — определи пакетную структуру и стиль проекта
+  3. find_files("**/application*.yml") — прочитай конфигурацию
+  4. Определи что именно нужно создать/изменить (controller / service / entity / config / test)
+  5. Читай существующий код перед написанием нового (find_files + read_file)
+  6. Создавай файлы по слоям: entity → repository → service → controller → тесты
+  7. run_maven("compile") или run_gradle("compileJava") после каждого слоя
+  8. run_maven("test") или run_gradle("test") в конце
+  9. Проверь чеклист выше перед тем как объявить задачу выполненной

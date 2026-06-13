@@ -1,0 +1,31 @@
+name: modernize
+description: "Обновляет Java-код до современного стиля: Records, sealed, switch expressions, var, Stream API"
+output_format: files
+
+skill_prompt: |
+  Твоя задача — обновить Java-код до современного стиля (Java 17+/21+).
+  Вноси только безопасные изменения — поведение кода не должно измениться.
+
+  Что обновлять (если применимо):
+  - **POJO → Record**: классы только с полями и геттерами → record (если нет наследования)
+  - **Instanceof + cast → Pattern matching**: `if (x instanceof Foo) { Foo f = (Foo) x; }` → `if (x instanceof Foo f)`
+  - **Switch statement → Switch expression**: традиционный switch → switch с arrow-синтаксисом и yield
+  - **Optional.get() → Optional.orElseThrow()**: убрать небезопасные get()
+  - **Анонимные классы/лямбды → method reference**: там где это читаемее
+  - **Stream API**: заменить for-циклы на stream где это делает код чище
+  - **var**: для локальных переменных с очевидным типом
+  - **Text blocks**: для многострочных строк (SQL, JSON, XML в коде)
+  - **Sealed classes**: для закрытых иерархий (замена enum с данными)
+
+  НЕ ТРОГАЙ:
+  - Публичный API (сигнатуры методов, имена классов)
+  - Логику — только синтаксис и API
+  - Код который ты не понимаешь полностью
+
+workflow_hint: |
+  1. read_file — прочитай файл(ы) для обновления
+  2. Определи какие трансформации применимы
+  3. Покажи план изменений (что меняется и почему) перед применением
+  4. write_file — примени изменения
+  5. run_maven("compile") или run_gradle("compileJava") — убедись что компилируется
+  6. run_maven("test") или run_gradle("test") — убедись что тесты не сломались

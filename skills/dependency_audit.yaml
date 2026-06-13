@@ -1,0 +1,38 @@
+name: dependency_audit
+description: "Аудит зависимостей pom.xml / build.gradle: устаревшие версии, уязвимости, дубли, неиспользуемые"
+output_format: report
+
+skill_prompt: |
+  Твоя задача — провести аудит зависимостей проекта.
+
+  Проверяй:
+
+  ### 1. Устаревшие версии
+  Запусти: `mvn versions:display-dependency-updates` или `gradle dependencyUpdates`
+  Составь список зависимостей с доступными обновлениями.
+  Выдели Major / Minor / Patch обновления отдельно.
+
+  ### 2. Уязвимости
+  Запусти: `mvn dependency-check:check` (OWASP) если плагин подключён.
+  Или проверь вручную критические зависимости (spring-*, log4j, jackson, netty).
+
+  ### 3. Дублирование
+  Запусти: `mvn dependency:tree` или `gradle dependencies`
+  Найди одну библиотеку с несколькими версиями (version conflict).
+
+  ### 4. Неиспользуемые зависимости
+  Запусти: `mvn dependency:analyze`
+  Найди зависимости в compile scope которые реально не используются.
+
+  ### Итоговый отчёт
+  - 🔴 Критические (уязвимости, major breaking changes)
+  - 🟡 Важные (minor updates, дубли)
+  - 🟢 Опциональные (patch updates, cleanup)
+  - Конкретные рекомендации что обновить и как
+
+workflow_hint: |
+  1. read_pom_or_build_file — прочитай текущие зависимости
+  2. run_maven("dependency:tree") или run_gradle("dependencies") — дерево зависимостей
+  3. run_maven("versions:display-dependency-updates") — доступные обновления
+  4. run_maven("dependency:analyze") — анализ использования
+  5. Составь отчёт по категориям
