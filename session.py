@@ -159,7 +159,7 @@ class AgentSession:
         self._graph = create_react_agent(
             llm,
             tools,
-            state_modifier=SystemMessage(content=system),
+            prompt=SystemMessage(content=system),
             checkpointer=MemorySaver(),
         )
         return self._graph
