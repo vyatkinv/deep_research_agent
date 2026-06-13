@@ -108,6 +108,30 @@ INIT_TASK = """\
 
 COMPACT_THRESHOLD = 30  # авто-компакт при превышении
 
+# Пороги контекста для цветовой индикации (в токенах)
+# GigaChat-Max / GPT-4 имеют ~32k–128k. Настраивай под свою модель.
+_CTX_WARN  = 20_000   # жёлтый
+_CTX_CRIT  = 28_000   # красный
+
+_ANSI_YELLOW = "\033[33m"
+_ANSI_RED    = "\033[31m"
+_ANSI_RESET  = "\033[0m"
+_USE_ANSI    = sys.stdout.isatty()
+
+
+def _fmt_tokens(tokens: int) -> str:
+    """Форматирует количество токенов с цветовой индикацией через ANSI."""
+    if tokens >= 1000:
+        display = f"ctx {tokens / 1000:.1f}k"
+    else:
+        display = f"ctx {tokens}"
+    if _USE_ANSI:
+        if tokens >= _CTX_CRIT:
+            return f"{_ANSI_RED}{display}{_ANSI_RESET}"
+        if tokens >= _CTX_WARN:
+            return f"{_ANSI_YELLOW}{display}{_ANSI_RESET}"
+    return display
+
 # ────────────────────────── Helpers ─────────────────────────────────
 
 def _detect_project_info(root: str) -> Dict[str, str]:
@@ -312,10 +336,17 @@ class JavaAgentCLI:
         skill_part = f"[{self.active_skill.name}] " if self.active_skill else ""
         auto_part  = "~" if self.auto_skill and not self.active_skill else ""
         count = self.session.message_count()
-        count_part = f"({count}) " if count > 0 else ""
+
+        # Токены: показываем input-токены последнего вызова (= текущий контекст)
+        ctx_tok = self.session.last_input_tokens()
+        if ctx_tok > 0:
+            tok_str = _fmt_tokens(ctx_tok)
+            count_part = f"({count} | {tok_str}) " if count > 0 else f"({tok_str}) "
+        else:
+            count_part = f"({count}) " if count > 0 else ""
+
         prompt_str = f"{count_part}{skill_part}{auto_part}> "
         try:
-            # Явный вывод промта и чтение из буфера — обход проблем с кодировкой stdin
             import sys
             sys.stdout.write(prompt_str)
             sys.stdout.flush()
@@ -582,6 +613,9 @@ class JavaAgentCLI:
             ("Verbose",         "вкл" if self.verbose else "выкл"),
             ("MCP серверы",     ", ".join(s.name for s in self.cfg.mcp.servers) or "нет"),
             ("Активный скилл",  self.active_skill.name if self.active_skill else "нет"),
+            ("Токены (ctx)",    f"{self.session.last_input_tokens():,}" or "—"),
+            ("Токены (сессия)", f"{self.session.session_total_tokens():,}" or "—"),
+            ("Логирование",     str(self.session.logger.log_path) if self.session.logger.log_path else "выкл"),
         ]
         for k, v in rows:
             t.add_row(k, str(v))

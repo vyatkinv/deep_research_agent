@@ -14,7 +14,8 @@ import sys
 from typing import Any, AsyncIterator, Dict, List, Optional
 from uuid import uuid4
 
-from config import AppConfig, GigaChatConfig, JavaConfig, JavaPromptsConfig, SkillConfig
+from config import AppConfig, GigaChatConfig, JavaConfig, JavaPromptsConfig, LoggingConfig, SkillConfig
+from logger import SessionLogger
 
 DEFAULT_SYSTEM_PROMPT = """\
 Ты — опытный Java-разработчик (Senior/Principal уровень).
@@ -124,6 +125,19 @@ class AgentSession:
         # (граф нельзя создать без API-ключа, поэтому инъекция ленивая)
         self._pending_context: Optional[str] = None
 
+        # Счётчики токенов
+        self._last_input_tokens: int = 0    # input-токены последнего вызова (≈ размер контекста)
+        self._last_output_tokens: int = 0
+        self._session_total_tokens: int = 0  # кумулятивно за всю сессию
+
+        # Логгер
+        log_cfg: LoggingConfig = cfg.logging
+        self.logger = SessionLogger(
+            logs_dir=log_cfg.logs_dir,
+            session_id=self.thread_id,
+            enabled=log_cfg.enabled,
+        )
+
     # ──────────────────── graph building ────────────────────────────
 
     async def _ensure_tools(self) -> List[Any]:
@@ -175,6 +189,63 @@ class AgentSession:
         graph = builder(self.cfg)
         self._subgraphs[skill.name] = graph
         return graph
+
+    # ──────────────────── token tracking & logging ──────────────────
+
+    def _process_chunk_for_logging(
+        self,
+        chunk: Dict[str, Any],
+        skill_name: Optional[str] = None,
+    ) -> None:
+        """Извлечь токены и залогировать события из одного LangGraph-чанка."""
+        for node_name, node_data in chunk.items():
+            if not isinstance(node_data, dict):
+                continue
+            for msg in node_data.get("messages", []):
+                if isinstance(msg, dict):
+                    continue
+
+                msg_type = type(msg).__name__
+
+                # AIMessage — ответ модели или вызов инструмента
+                if msg_type == "AIMessage":
+                    # Токены
+                    usage = getattr(msg, "usage_metadata", None)
+                    if usage and isinstance(usage, dict):
+                        inp = usage.get("input_tokens", 0)
+                        out = usage.get("output_tokens", 0)
+                        tot = usage.get("total_tokens", inp + out)
+                        if tot > 0:
+                            self._last_input_tokens = inp
+                            self._last_output_tokens = out
+                            self._session_total_tokens += tot
+                            self.logger.log_tokens(inp, out, tot)
+
+                    # Вызовы инструментов
+                    for tc in getattr(msg, "tool_calls", []):
+                        name = tc.get("name", "") if isinstance(tc, dict) else getattr(tc, "name", "")
+                        args = tc.get("args", {}) if isinstance(tc, dict) else getattr(tc, "args", {})
+                        self.logger.log_tool_call(name, args)
+
+                    # Текстовый ответ
+                    content = getattr(msg, "content", "")
+                    if content:
+                        self.logger.log_ai(content, skill=skill_name)
+
+                # ToolMessage — результат инструмента
+                elif msg_type == "ToolMessage":
+                    content = str(getattr(msg, "content", ""))
+                    name = getattr(msg, "name", "")
+                    tc_id = getattr(msg, "tool_call_id", "")
+                    self.logger.log_tool_result(name, content, tc_id)
+
+    def last_input_tokens(self) -> int:
+        """Количество input-токенов последнего вызова (≈ текущий размер контекста)."""
+        return self._last_input_tokens
+
+    def session_total_tokens(self) -> int:
+        """Суммарное количество токенов за всю сессию."""
+        return self._session_total_tokens
 
     # ──────────────────── streaming ─────────────────────────────────
 
@@ -239,12 +310,18 @@ class AgentSession:
             if addon:
                 content = f"{addon}\n\n---\n\n{message}"
 
+        skill_name = skill.name if skill else None
+        self.logger.log_user(message, skill=skill_name)
+        if skill:
+            self.logger.log_skill(skill_name, auto=True)  # type: ignore[arg-type]
+
         config = {"configurable": {"thread_id": self.thread_id}}
         async for chunk in graph.astream(
             {"messages": [{"role": "user", "content": content}]},
             config=config,
             stream_mode="updates",
         ):
+            self._process_chunk_for_logging(chunk, skill_name)
             yield chunk
 
     # ──────────────────── compact ───────────────────────────────────
@@ -322,7 +399,10 @@ class AgentSession:
         graph.update_state(new_config, {"messages": [summary_msg] + list(to_keep)})
 
         self.thread_id = new_thread_id
+        self._last_input_tokens = 0
+        self._last_output_tokens = 0
         new_count = 1 + len(to_keep)
+        self.logger.log_compact(total, new_count, len(to_summarize))
         return (
             f"Компакт выполнен: {total} → {new_count} сообщений "
             f"({len(to_summarize)} сжато в резюме, {len(to_keep)} оставлено)"
@@ -401,6 +481,10 @@ class AgentSession:
         """Начать новую ветку диалога (новый thread_id, чистая история)."""
         self.thread_id = str(uuid4())
         self._graph = None   # пересоздадим с новым MemorySaver
+        self._last_input_tokens = 0
+        self._last_output_tokens = 0
+        self._session_total_tokens = 0
+        self.logger.new_session(self.thread_id)
 
     def update_project(self, project_root: str) -> None:
         """Сменить рабочую директорию проекта и сбросить кэш инструментов."""

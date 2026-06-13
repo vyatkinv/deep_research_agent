@@ -27,6 +27,11 @@ models:
    compression: "gigachat:GigaChat-Pro"
    final_report: "gigachat:GigaChat-Max"
 
+# ── Логирование общения с моделью ────────────────────────────────────
+logging:
+  enabled: true          # писать JSONL-лог в logs/
+  logs_dir: "logs"       # директория относительно CWD
+
 # Java-специфичные настройки
 java:
   project_root: "."                        # корень Java-проекта

@@ -197,6 +197,20 @@ class SkillConfig(BaseModel):
         return "\n\n".join(parts)
 
 
+# ──────────────────────────── Logging config ────────────────────────
+
+
+class LoggingConfig(BaseModel):
+    """Ведение JSONL-лога общения с моделью.
+
+    Лог пишется в logs/<дата>_<session_id>.jsonl.
+    Каждая строка — JSON-объект с полями ts, event, и данными события.
+    """
+
+    enabled: bool = False
+    logs_dir: str = "logs"
+
+
 # ──────────────────────────── GigaChat config ───────────────────────
 
 
@@ -241,6 +255,8 @@ class AppConfig(BaseModel):
     java_prompts: Optional[JavaPromptsConfig] = None
     # GigaChat (опционально)
     gigachat: Optional[GigaChatConfig] = None
+    # Логирование (опционально)
+    logging: LoggingConfig = Field(default_factory=LoggingConfig)
 
 
 # ──────────────────────────── loader ────────────────────────────────

@@ -21,3 +21,4 @@ build/
 
 # LangGraph / LangChain cache
 .langchain.db
+logs/
