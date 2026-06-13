@@ -13,7 +13,7 @@ langchain-openai>=0.2.0          # OpenAI + любой OpenAI-совместим
 # langchain-anthropic>=0.2.0
 # langchain-google-genai>=2.0.0
 # langchain-ollama>=0.2.0        # локальные модели через Ollama
-langchain-gigachat>=0.3.0      # GigaChat (Сбер) — pip install langchain-gigachat
+langchain-gigachat>=0.3.0      # GigaChat (Сбер)
 
 # ── MCP интеграция (Python, open-source) ────────────────────────────
 langchain-mcp-adapters>=0.1.0
